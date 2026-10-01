@@ -3,13 +3,13 @@ import os
 import re
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
 
 st.set_page_config(page_title="Kartarpur-0 | Sangat-Sim", page_icon="🌾", layout="centered")
 
 st.title("🌾 Kartarpur-0: Sangat-Sim")
 st.caption("Civic Oracle & Stress-Testing Engine for an Automated, Post-Scarcity Commune")
 
-# Read Charter and Governance to ground the LLM
 def load_context():
     ctx = ""
     for path in ["charter/CHARTER.md", "governance/GOVERNANCE.md"]:
@@ -35,7 +35,6 @@ Directives:
 [RFC_TRIGGER]: {{"title": "<concise summary>", "category": "<governance|logistics|ethics|infrastructure>", "severity": "<low|medium|high>"}}
 """
 
-# Read API key from Streamlit secrets, env var, or fallback sidebar
 default_key = ""
 if "GEMINI_API_KEY" in st.secrets:
     default_key = st.secrets["GEMINI_API_KEY"]
@@ -66,28 +65,43 @@ if user_input:
         with st.chat_message("assistant"):
             st.error("Please configure GEMINI_API_KEY in Streamlit Secrets or sidebar.")
     else:
-        try:
-            client = genai.Client(api_key=api_key)
-            config = types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                temperature=0.3
-            )
-            with st.chat_message("assistant"):
-                resp = client.models.generate_content(
-                    model="gemini-3.8-flash",
-                    contents=user_input,
-                    config=config
-                )
-                full_text = resp.text.strip()
-                
-                rfc_match = re.search(r'\[RFC_TRIGGER\]:\s*(\{.*\})', full_text)
-                clean_text = re.sub(r'\[RFC_TRIGGER\]:.*', '', full_text).strip()
+        client = genai.Client(api_key=api_key)
+        config = types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            temperature=0.3
+        )
+        
+        # Candidate model ladder to handle upstream 503 capacity spikes
+        candidate_models = ["gemini-3.8-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite"]
+        resp_text = None
+        last_error = None
+
+        with st.chat_message("assistant"):
+            with st.spinner("Reflecting on the commons..."):
+                for model in candidate_models:
+                    try:
+                        resp = client.models.generate_content(
+                            model=model,
+                            contents=user_input,
+                            config=config
+                        )
+                        resp_text = resp.text.strip()
+                        break
+                    except APIError as e:
+                        last_error = e
+                        if e.code == 503:
+                            continue  # Fall through to next model
+                        else:
+                            raise e
+
+            if resp_text:
+                rfc_match = re.search(r'\[RFC_TRIGGER\]:\s*(\{.*\})', resp_text)
+                clean_text = re.sub(r'\[RFC_TRIGGER\]:.*', '', resp_text).strip()
                 st.markdown(clean_text)
 
                 if rfc_match:
                     st.warning(f"⚠️ **Edge Case Logged for Repository RFC:**\n`{rfc_match.group(1)}`")
 
-                st.session_state.messages.append({"role": "assistant", "content": full_text})
-        except Exception as e:
-            with st.chat_message("assistant"):
-                st.error(f"Error: {e}")
+                st.session_state.messages.append({"role": "assistant", "content": resp_text})
+            else:
+                st.error(f"Upstream capacity temporarily exhausted across models: {last_error}")
