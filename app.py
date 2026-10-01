@@ -35,7 +35,16 @@ Directives:
 [RFC_TRIGGER]: {{"title": "<concise summary>", "category": "<governance|logistics|ethics|infrastructure>", "severity": "<low|medium|high>"}}
 """
 
-api_key = st.sidebar.text_input("Gemini API Key", type="password", value=os.getenv("GEMINI_API_KEY", ""))
+# Read API key from Streamlit secrets, env var, or fallback sidebar
+default_key = ""
+if "GEMINI_API_KEY" in st.secrets:
+    default_key = st.secrets["GEMINI_API_KEY"]
+elif "GEMINI_API_KEY" in os.environ:
+    default_key = os.environ["GEMINI_API_KEY"]
+
+api_key = default_key
+if not default_key:
+    api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
@@ -55,26 +64,30 @@ if user_input:
 
     if not api_key:
         with st.chat_message("assistant"):
-            st.error("Please enter a Gemini API Key in the sidebar.")
+            st.error("Please configure GEMINI_API_KEY in Streamlit Secrets or sidebar.")
     else:
-        client = genai.Client(api_key=api_key)
-        config = types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            temperature=0.3
-        )
-        with st.chat_message("assistant"):
-            resp = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=user_input,
-                config=config
+        try:
+            client = genai.Client(api_key=api_key)
+            config = types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                temperature=0.3
             )
-            full_text = resp.text.strip()
-            
-            rfc_match = re.search(r'\[RFC_TRIGGER\]:\s*(\{.*\})', full_text)
-            clean_text = re.sub(r'\[RFC_TRIGGER\]:.*', '', full_text).strip()
-            st.markdown(clean_text)
+            with st.chat_message("assistant"):
+                resp = client.models.generate_content(
+                    model="gemini-3.8-flash",
+                    contents=user_input,
+                    config=config
+                )
+                full_text = resp.text.strip()
+                
+                rfc_match = re.search(r'\[RFC_TRIGGER\]:\s*(\{.*\})', full_text)
+                clean_text = re.sub(r'\[RFC_TRIGGER\]:.*', '', full_text).strip()
+                st.markdown(clean_text)
 
-            if rfc_match:
-                st.warning(f"⚠️ **Edge Case Logged for Repository RFC:**\n`{rfc_match.group(1)}`")
+                if rfc_match:
+                    st.warning(f"⚠️ **Edge Case Logged for Repository RFC:**\n`{rfc_match.group(1)}`")
 
-            st.session_state.messages.append({"role": "assistant", "content": full_text})
+                st.session_state.messages.append({"role": "assistant", "content": full_text})
+        except Exception as e:
+            with st.chat_message("assistant"):
+                st.error(f"Error: {e}")
