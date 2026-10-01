@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 import re
-import time
+import glob
 from google import genai
 from google.genai import types
 
@@ -10,12 +10,20 @@ st.set_page_config(page_title="Kartarpur-0 | Sangat-Sim", page_icon="🌾", layo
 st.title("🌾 Kartarpur-0: Sangat-Sim")
 st.caption("Civic Oracle & Stress-Testing Engine for an Automated, Post-Scarcity Commune")
 
+# Dynamically load Charter, Governance, and all Infrastructure specs
 def load_context():
     ctx = ""
+    # Base documents
     for path in ["charter/CHARTER.md", "governance/GOVERNANCE.md"]:
         if os.path.exists(path):
             with open(path, "r") as f:
                 ctx += f"\n--- {path} ---\n" + f.read()
+    
+    # Ingest all modular engineering specs
+    for path in glob.glob("infrastructure/specs/*.md"):
+        with open(path, "r") as f:
+            ctx += f"\n--- {path} ---\n" + f.read()
+            
     return ctx
 
 context_docs = load_context()
@@ -60,13 +68,10 @@ if user_input:
             st.error("Please configure GEMINI_API_KEY in Streamlit Secrets or sidebar.")
     else:
         client = genai.Client(api_key=api_key)
-        
-        # Validated aliases from your account's model list:
         models_to_try = [
             "gemini-flash-latest",
             "gemini-3.7-flash",
-            "gemini-flash-lite-latest",
-            "gemini-3.8-flash"
+            "gemini-flash-lite-latest"
         ]
 
         full_text = None
@@ -89,7 +94,6 @@ if user_input:
                             break
                     except Exception as e:
                         last_error = e
-                        time.sleep(0.5)
                         continue
 
             if full_text:
@@ -102,4 +106,4 @@ if user_input:
 
                 st.session_state.messages.append({"role": "assistant", "content": full_text})
             else:
-                st.error(f"Error connecting to models: {last_error}")
+                st.error(f"Error querying Gemini: {last_error}")
